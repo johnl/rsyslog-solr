@@ -1,0 +1,64 @@
+#!/usr/bin/env ruby
+
+require 'net/http'
+require 'uri'
+require 'syslog'
+
+NAMED_PIPE = ENV["NAMED_PIPE"] || "/tmp/rsyslog-solr"
+COMMIT_EVERY = (ENV["COMMIT_EVERY"] || 10).to_i
+RETRIES = (ENV["RETRIES"] || 3).to_i
+solr_url = ENV["URL"] || "http://localhost:8080/solr/update"
+SOLR_URL = URI.parse(solr_url)
+DEBUG = ENV["DEBUG"] || false
+
+LOGGER = Syslog.open("rsyslog-solr", Syslog::LOG_PID | Syslog::LOG_CONS)
+
+lines = []
+data = nil
+
+def post_lines_to_solr(lines)
+	data = "<add commitWithin='10000'>#{lines.join("\n")}</add>"
+	retry_count = 0
+	begin
+		req = Net::HTTP::Post.new(SOLR_URL.path)
+	   	req.body = data
+		req.content_type = 'text/xml'
+		res = Net::HTTP.new(SOLR_URL.host, SOLR_URL.port).start {|http| http.request(req) }
+		raise "error" unless Net::HTTPSuccess === res
+	rescue
+		LOGGER.warning("Error writing to solr: #{res.inspect}")
+		if retry_count < RETRIES
+			retry_count += 1
+			sleep retry_count * 10
+			LOGGER.notice("Retrying writing to solr")
+			retry
+		else
+			LOGGER.error("Abandoning #{lines.size} log lines due to problems contacting solr")
+		end
+	end
+end
+
+LOGGER.notice("Will submit logs to solr at #{solr_url}")
+LOGGER.notice("Attempting to listen for syslog messages on #{NAMED_PIPE}, committing every #{COMMIT_EVERY} entries")
+begin
+	open(NAMED_PIPE, "r").each_line do |line|
+		STDERR.puts("Received: #{line}") if DEBUG
+		unless line =~ /<doc>.*?<\/doc>/
+			LOGGER.warning "Ignoring corrupted line"
+			next
+		end
+		lines << line	
+		if lines.size >= COMMIT_EVERY
+			post_lines_to_solr(lines) 
+			lines.replace []
+		end
+	end
+rescue SystemExit, Interrupt
+	LOGGER.warning("Interrupted, shutting down")
+	if lines.size > 0
+		post_lines_to_solr(lines)
+	end
+	raise
+end
+
+LOGGER.info("Shut down.")

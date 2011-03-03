@@ -1,0 +1,71 @@
+= rsyslog-solr
+
+rsyslog-solr is a couple of scripts and configs to write syslog
+mesages into solr to allow full text searches.  Currently just a proof
+of concept and needs further work.
+
+== Installation
+
+You'll need ruby and solr.  On Debian/Ubuntu you can install the ruby
+and solr-jetty packages.
+
+=== rsyslog-solr configuration
+
+Copy the rsyslog-solr script to /usr/local/bin and copy the
+rsyslog-solr.conf upstart script into /etc/init
+
+=== rsyslog configuration
+
+The following lines added to your /etc/rsyslog.conf will get the log
+entries written to the named pipe in the right format:
+
+  $template SolrFormat,"<doc><field name='from'>%FROMHOST%</field> <field name='facility'>%syslogfacility-text%</field> <field name='msg'><![CDATA[%msg%]]></field> <field name='hostname'>%HOSTNAME%</field> <field name='priority'>%syslogpriority%</field> <field name='tag'>%syslogtag%</field> <field name='program'>%programname%</field> <field name='severity'>%syslogseverity-text%</field> <field name='generated'>%timegenerated:::date-rfc3339%</field></doc>\n"
+  *.* |/tmp/rsyslog-solr;SolrFormat
+
+Then configure your others hosts to log centrally to this server.
+
+=== solr configuration
+
+Copy the schema.xml to /usr/share/solr/conf/schema.xml and
+start/restart solr.  Schema changes don't take effect if you've
+already written data to the solr db, so you'll need to wipe it out if
+you didn't do this before the other bits (rm -rf /var/lib/solr/data/)
+
+== Searching
+
+Log lines are written to solr in batches of 10, and each batch should
+be available for search within 10 seconds by default.
+
+Use the rsyslog-solr-search script to conduct searches.
+
+The environment variable LIMIT sets how many results to display, and
+PAGE let's you page through the results.
+
+=== find failed logins
+  $ rsyslog-solr-search failed password
+  page 1 of 50555 hits for search "failed password"
+  2011-03-03T12:31:12.402385+00:00 srv-g1xxx sshd  Failed password for invalid user password from 119.188.7.168 port 63741 ssh2
+  2011-03-03T12:16:43.272207+00:00 srv-5axxx sshd  Failed password for invalid user password from 119.188.7.168 port 35110 ssh2
+  2011-03-03T20:23:56.767459+00:00 srv-d2xxx sshd  Failed password for root from 116.255.130.196 port 43757 ssh2
+
+=== show all log message from the last hour
+  $ rsyslog-solr-search timestamp:[NOW-1HOUR TO NOW] 
+  page 1 of 1800 hits for search "timestamp:[NOW-1HOUR TO NOW]"
+
+== Notes
+
+* any user that can generate logs that are sent to the system can
+  cause a denial of service attack by sending specially malformed
+  messages. This can be fixed by moving the formatting of the log
+  entries from rsyslog into the ruby script, but I've not done it yet.
+* the timestamp field is actually the time the line was received by
+  solr, not the time it was generated.  This can again be fixed by
+  moving the formatting into the ruby script.
+
+= More Info
+
+Author::  John Leach  (mailto:john@johnleach.co.uk)
+Copyright:: Copyright (c) 2011 John Leach
+License:: MIT
+Github:: http://github.com/johnl/rsyslog-solr/tree/master
+Blog: http://johnleach.co.uk/words/?p=744

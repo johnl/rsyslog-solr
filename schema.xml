@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+
+<schema name="rsyslog-solr" version="1.2">
+
+  <types>
+    <fieldType name="int" class="solr.TrieIntField" precisionStep="0" omitNorms="true" positionIncrementGap="0"/>
+    <fieldType name="tdate" class="solr.TrieDateField" omitNorms="true" precisionStep="6" positionIncrementGap="0"/>
+    <fieldType name="uuid" class="solr.UUIDField" indexed="true" />
+
+    <fieldType name="text" class="solr.TextField" positionIncrementGap="100">
+      <analyzer type="index">
+        <tokenizer class="solr.WhitespaceTokenizerFactory"/>
+        <filter class="solr.WordDelimiterFilterFactory" generateWordParts="1" generateNumberParts="1" catenateWords="1" catenateNumbers="1" catenateAll="0" splitOnCaseChange="1" preserveOriginal="1" />
+        <filter class="solr.LowerCaseFilterFactory"/>
+      </analyzer>
+      <analyzer type="query">
+        <tokenizer class="solr.WhitespaceTokenizerFactory"/>
+        <filter class="solr.WordDelimiterFilterFactory" generateWordParts="1" generateNumberParts="1" catenateWords="0" catenateNumbers="0" catenateAll="0" splitOnCaseChange="1" preserveOriginal="1" />
+        <filter class="solr.LowerCaseFilterFactory"/>
+      </analyzer>
+    </fieldType>
+
+    <fieldType name="lowercase" class="solr.TextField" positionIncrementGap="100">
+      <analyzer>
+        <tokenizer class="solr.KeywordTokenizerFactory"/>
+        <filter class="solr.LowerCaseFilterFactory" />
+      </analyzer>
+    </fieldType>
+ </types>
+
+ <fields>
+   <field name="id" type="uuid" indexed="true" stored="true" default="NEW"/>
+   <field name="from" type="lowercase"  indexed="true" stored="true" />
+   <field name="facility" type="lowercase"  indexed="true" stored="true" />
+   <field name="hostname" type="lowercase"  indexed="true" stored="true" />
+   <field name="tag" type="lowercase"  indexed="true" stored="true" />
+   <field name="program" type="lowercase"  indexed="true" stored="true" />
+   <field name="severity" type="lowercase"  indexed="true" stored="true" />
+   <field name="priority" type="int" indexed="true" stored="true" />
+   <field name="msg" type="text" indexed="true" stored="true" compressed="true" />
+   <field name="generated" type="lowercase" indexed="true" stored="true" />
+   <field name="text" type="text" indexed="true" stored="false" multiValued="true"/>
+   <field name="timestamp" type="tdate" indexed="true" stored="true" default="NOW" multiValued="false"/>
+ </fields>
+
+ <uniqueKey>id</uniqueKey>
+
+ <defaultSearchField>text</defaultSearchField>
+
+ <solrQueryParser defaultOperator="OR"/>
+
+ <copyField source="facility" dest="text"/>
+ <copyField source="program" dest="text"/>
+ <copyField source="severity" dest="text"/>
+ <copyField source="msg" dest="text"/>
+ <copyField source="hostname" dest="text"/>
+	
+</schema>
