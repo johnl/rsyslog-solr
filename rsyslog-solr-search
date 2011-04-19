@@ -3,49 +3,96 @@
 require 'net/http'
 require 'uri'
 require "rexml/document"
+require "date"
+require "time"
+
+class Time
+  def to_s
+    strftime('%Y-%m-%dT%H:%M:%SZ')
+  end
+end
 
 class Doc
-	attr_reader :attributes
+  attr_reader :attributes
 
-	def initialize(element)
-		@attributes = {}
-		@element = element
-		element.elements.each("*") do |e|
-			@attributes[e.attributes["name"]] = e.text
-		end
-	end
+  def initialize(element)
+    @attributes = {}
+    @element = element
+    element.elements.each("*") do |e|
+      if e.attributes["name"] == "timestamp"
+        @attributes["timestamp"] = Time.parse(e.text) rescue Time.now
+      else
+        @attributes[e.attributes["name"]] = e.text
+      end
+    end
+  end
 
-	def [](key)
-		attributes[key.to_s]
-	end
+  def [](key)
+    attributes[key.to_s]
+  end
 end
 
 solr_url = ENV["URL"] || "http://localhost:8080/solr/select"
 SOLR_URL = URI.parse(solr_url)
-QUERY = ENV["QUERY"] || ARGV.join(" ")
-LIMIT = (ENV["LIMIT"] || 15).to_i
-PAGE = (ENV["PAGE"] || 1).to_i
-OFFSET = (PAGE-1) * LIMIT
+query = ENV["QUERY"] || ARGV.join(" ")
+limit = (ENV["LIMIT"] || 15).to_i
+page = (ENV["PAGE"] || 1).to_i
+offset = (page - 1) * limit
+sort = ENV["SORT"]
+if ENV["AT"]
+  at = Time.parse(ENV["AT"])
+  timespan = (ENV["TIMESPAN"] || 120).to_i
+  from = at - timespan
+  to = at + timespan
+  query = "+(timestamp:[#{from} TO #{to}]) AND (#{query})"
+  sort = "time" unless sort
+end
+sort = (sort == "time") ? "timestamp desc" : "score desc, timestamp desc"
 
-lines = []
-data = nil
-req = Net::HTTP::Get.new(SOLR_URL.path)
-req.set_form_data({ :q => QUERY, :start => OFFSET, :rows => LIMIT, :sort => "score desc, timestamp desc" })
-req = Net::HTTP::Get.new(SOLR_URL.path + '?' + req.body)
-res = Net::HTTP.new(SOLR_URL.host, SOLR_URL.port).start { |http| http.request(req) }
+def search(query, options = {})
+  req = Net::HTTP::Get.new(SOLR_URL.path)
+  req.set_form_data(options.merge(:q => query))
+  req = Net::HTTP::Get.new(SOLR_URL.path + '?' + req.body)
+  res = Net::HTTP.new(SOLR_URL.host, SOLR_URL.port).start { |http| http.request(req) }
 
-root = REXML::Document.new res.body
+  root = REXML::Document.new res.body
 
-result = root.elements["response/result[1]"] 
+  result = root.elements["response/result[1]"] 
 
-if result.nil?
-	STDERR.puts "ERROR: #{res.body}"
-	exit 1
+  if result.nil?
+    msg = res.message
+    msg.gsub!('org.apache.lucene.queryParser.ParseException','')
+    STDERR.puts "#{res.code} #{msg[0..100]}..."
+    exit 1
+  end
+
+  docs = result.elements.collect("doc") do |e|
+    Doc.new(e)
+  end
+  { :docs => docs, :total => result.attributes["numFound"] }
 end
 
-STDERR.puts "page #{PAGE} of #{ result.attributes["numFound"] } hits for search \"#{QUERY}\""
+if ENV["TAIL"]
+  STDERR.puts "Tail for search \"#{query}\""
+  sort = "timestamp asc"
+  last_doc_ids = []
+  highest_timestamp = Time.now - 60
+  while true do
+    # FIXME: Adding one second here might miss some messages. Compare
+    # document ids to exclude duplicates instead.
+    r = search("+(timestamp:[#{highest_timestamp+1} TO NOW]) AND (#{query})", :start => offset, :rows => limit, :sort => sort)
+    docs = r[:docs]
+    docs.each do |doc|
+      highest_timestamp = doc[:timestamp] if doc[:timestamp] > highest_timestamp
+      puts "#{doc[:timestamp]} #{doc[:hostname]} #{doc[:program]} #{doc[:msg]}"
+    end
+    sleep 2
+  end
+else
+  r = search(query, :start => offset, :rows => limit, :sort => sort)
+  STDERR.puts "Page #{page} of #{r[:total] } hits for search \"#{query}\""
 
-result.elements.each("doc") do |e|
-	doc = Doc.new(e)
-	puts "#{doc[:generated]} #{doc[:hostname]} #{doc[:program]} #{doc[:msg]}"
+  r[:docs].each do |doc|
+    puts "#{doc[:generated]} #{doc[:hostname]} #{doc[:program]} #{doc[:msg]}"
+  end
 end
