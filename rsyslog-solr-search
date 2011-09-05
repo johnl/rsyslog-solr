@@ -39,6 +39,7 @@ limit = (ENV["LIMIT"] || 15).to_i
 page = (ENV["PAGE"] || 1).to_i
 offset = (page - 1) * limit
 sort = ENV["SORT"]
+
 if ENV["AT"]
   at = Time.parse(ENV["AT"])
   timespan = (ENV["TIMESPAN"] || 120).to_i
@@ -47,6 +48,17 @@ if ENV["AT"]
   query = "+(timestamp:[#{from} TO #{to}]) AND (#{query})"
   sort = "time" unless sort
 end
+
+if ENV["BEFORE"]
+  before = Time.parse(ENV["BEFORE"])
+  query = "+(timestamp:[* TO #{before}]) AND (#{query})"
+end
+
+if ENV["AFTER"]
+  after = Time.parse(ENV["AFTER"])
+  query = "+(timestamp:[#{after} TO *]) AND (#{query})"
+end
+
 sort = (sort == "time") ? "timestamp desc" : "score desc, timestamp desc"
 
 def search(query, options = {})
